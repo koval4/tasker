@@ -90,7 +90,7 @@ add [filename] = do
 startReminder :: [String] -> IO()
 startReminder [filename] = do
     task <- getTopTask filename
-    repeatedTimer (remind task) (mDelay 5)
+    repeatedTimer (remind task) (sDelay 5)
     return ()
 
 remind :: Task -> IO()
