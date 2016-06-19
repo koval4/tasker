@@ -4,6 +4,7 @@ import Control.Concurrent.Suspend.Lifted
 import Control.Concurrent.Timer
 import DBus.Notify
 import Data.List
+import Data.List.Split
 import Data.Time
 import Data.Time.Format
 import System.Directory
@@ -25,12 +26,10 @@ instance Eq Task where
              && deadline    a == deadline    b
 
 makeTask :: String -> Task
-makeTask line = let f = span (/= ',') line
-                    s = span (/= ',') . drop 1 $ snd f
-                    t = span (/= ',') . drop 1 $ snd s
-                in Task { description = fst f
-                        , cost = read (fst s) :: Int
-                        , deadline = parseTimeOrError True defaultTimeLocale "%d.%m.%Y" $ fst t :: Day
+makeTask line = let a:b:c:other = splitOn "," line 
+                in Task { description = a
+                        , cost = read b :: Int
+                        , deadline = parseTimeOrError True defaultTimeLocale "%d.%m.%Y" c :: Day
                         }
 
 getPriority :: Day -> Task -> Integer
