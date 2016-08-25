@@ -10,23 +10,25 @@ import Data.Time.Format
 import System.Directory
 import System.Environment
 import System.IO
+import Control.Concurrent
 
 data Task = Task { description :: String
                  , cost :: Int
                  , deadline :: Day
-                 } 
+                 }
+
 instance Show Task where
     show task = (description task)
                 ++ ", " ++ (show . cost $ task)
                 ++ ", " ++ (formatTime defaultTimeLocale "%d.%m.%Y" $ deadline task)
 
 instance Eq Task where
-    a == b =    description a == description b 
-             && cost        a == cost        b 
+    a == b =    description a == description b
+             && cost        a == cost        b
              && deadline    a == deadline    b
 
 makeTask :: String -> Task
-makeTask line = let a:b:c:other = splitOn "," line 
+makeTask line = let a:b:c:_ = splitOn "," line
                 in Task { description = a
                         , cost = read b :: Int
                         , deadline = parseTimeOrError True defaultTimeLocale "%d.%m.%Y" c :: Day
@@ -35,20 +37,23 @@ makeTask line = let a:b:c:other = splitOn "," line
 getPriority :: Day -> Task -> Integer
 getPriority dl task = let numenator = (toInteger . (*3) . cost $ task)
                           denominator = (diffDays (deadline task) dl)
-                      in if denominator > 0 
+                      in if denominator > 0
                             then numenator `div` denominator
                             else toInteger (cost task ^ 3) + abs denominator
 
-getTopTask :: String -> IO Task
+getTopTask :: String -> IO (Maybe Task)
 getTopTask filename = do
     content <- readFile filename
-    utcCurrDay <- getCurrentTime
-    let currDay = utctDay utcCurrDay
-        tasks = makeTasks . lines $ content
-        priority = getPriority currDay
-     in return $ foldl1 (\acc task -> if priority acc < priority task
-                                                    then task
-                                                    else acc) tasks
+    if null content
+       then return Nothing
+       else do
+            utcCurrDay <- getCurrentTime
+            let currDay = utctDay utcCurrDay
+                tasks = makeTasks . lines $ content
+                priority = getPriority currDay
+              in return $ Just $ foldl1 (\acc task -> if priority acc < priority task
+                                                         then task
+                                                         else acc) tasks
 
 makeTasks :: [String] -> [Task]
 makeTasks = map makeTask . filter (/= "")
@@ -63,7 +68,9 @@ dispatch =  [ ("view", view)
 view :: [String] -> IO ()
 view [filename] = do
     task <- getTopTask filename
-    putStrLn $ description task
+    case task of
+      Nothing   -> return ()
+      Just task -> putStrLn $ description task
 
 remove :: [String] -> IO()
 remove [filename] = do
@@ -71,13 +78,16 @@ remove [filename] = do
     (tempName, tempHandle) <- openTempFile "." "temp"
     contents <- hGetContents handle
     task <- getTopTask filename
-    let tasks = makeTasks . lines $ contents
-        newTodo = delete task tasks
-    hPutStrLn tempHandle $ unlines . map show $ newTodo
-    hClose handle
-    hClose tempHandle
-    removeFile filename
-    renameFile tempName filename
+    case task of
+      Nothing   -> return ()
+      Just task -> do
+        let tasks = makeTasks . lines $ contents
+            newTodo = delete task tasks
+        hPutStrLn tempHandle $ unlines . map show $ newTodo
+        hClose handle
+        hClose tempHandle
+        removeFile filename
+        renameFile tempName filename
 
 add :: [String] -> IO()
 add [filename] = do
@@ -89,8 +99,12 @@ add [filename] = do
 startReminder :: [String] -> IO()
 startReminder [filename] = do
     task <- getTopTask filename
-    repeatedTimer (remind task) (sDelay 5)
-    return ()
+    case task of
+      Nothing -> return ()
+      Just task -> do
+        let delay = 5 :: Int
+        repeatedTimer (remind task) (sDelay $ fromIntegral delay)
+        threadDelay (delay * 1000)
 
 remind :: Task -> IO()
 remind task = do
