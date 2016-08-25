@@ -6,11 +6,11 @@ import DBus.Notify
 import Data.List
 import Data.List.Split
 import Data.Time
-import Data.Time.Format
 import System.Directory
 import System.Environment
 import System.IO
 import Control.Concurrent
+import Control.Monad
 
 data Task = Task { description :: String
                  , cost :: Int
@@ -101,10 +101,10 @@ startReminder [filename] = do
     task <- getTopTask filename
     case task of
       Nothing -> return ()
-      Just task -> do
-        let delay = 5 :: Int
-        repeatedTimer (remind task) (sDelay $ fromIntegral delay)
-        threadDelay (delay * 1000)
+      Just task -> forever $ do
+        let delay = 20 :: Int
+        repeatedTimer (remind task) (mDelay $ fromIntegral delay)
+        threadDelay (delay * 60 * 1000)
 
 remind :: Task -> IO()
 remind task = do
