@@ -1,7 +1,5 @@
 module Main where
 
-import Control.Concurrent.Suspend.Lifted
-import Control.Concurrent.Timer
 import DBus.Notify
 import Data.List
 import Data.List.Split
@@ -11,6 +9,8 @@ import System.Environment
 import System.IO
 import Control.Concurrent
 import Control.Monad
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Maybe
 
 data Task = Task { description :: String
                  , cost :: Int
@@ -41,53 +41,48 @@ getPriority dl task = let numenator = (toInteger . (*3) . cost $ task)
                             then numenator `div` denominator
                             else toInteger (cost task ^ 3) + abs denominator
 
-getTopTask :: String -> IO (Maybe Task)
+getTopTask :: String -> MaybeT IO Task
 getTopTask filename = do
-    content <- readFile filename
-    if null content
-       then return Nothing
-       else do
-            utcCurrDay <- getCurrentTime
-            let currDay = utctDay utcCurrDay
-                tasks = makeTasks . lines $ content
-                priority = getPriority currDay
-              in return $ Just $ foldl1 (\acc task -> if priority acc < priority task
-                                                         then task
-                                                         else acc) tasks
+    content <- lift $ readFile filename
+    guard (null content)
+    utcCurrDay <- lift getCurrentTime
+    let currDay = utctDay utcCurrDay
+        tasks = makeTasks . lines $ content
+        priority = getPriority currDay
+      in return $ foldl1 (\acc task -> if priority acc < priority task
+                                                 then task
+                                                 else acc) tasks
 
 makeTasks :: [String] -> [Task]
 makeTasks = map makeTask . filter (/= "")
 
 dispatch :: [(String, [String] -> IO ())]
-dispatch =  [ ("view", view)
+dispatch =  [ ("view", unwrapT view)
             , ("add", add)
-            , ("remove", remove)
-            , ("startReminder", startReminder)
+            , ("remove", unwrapT remove)
+            , ("startReminder", unwrapT startReminder)
             ]
+  where unwrapT fn args = runMaybeT (fn args) >> return ()
 
-view :: [String] -> IO ()
+view :: [String] -> MaybeT IO ()
 view [filename] = do
     task <- getTopTask filename
-    case task of
-      Nothing   -> return ()
-      Just task -> putStrLn $ description task
+    lift $ putStrLn $ description task
 
-remove :: [String] -> IO()
+remove :: [String] -> MaybeT IO()
 remove [filename] = do
-    handle <- openFile filename ReadMode
-    (tempName, tempHandle) <- openTempFile "." "temp"
-    contents <- hGetContents handle
+    handle <- lift $ openFile filename ReadMode
+    (tempName, tempHandle) <- lift $ openTempFile "." "temp"
+    contents <- lift $ hGetContents handle
     task <- getTopTask filename
-    case task of
-      Nothing   -> return ()
-      Just task -> do
-        let tasks = makeTasks . lines $ contents
-            newTodo = delete task tasks
-        hPutStrLn tempHandle $ unlines . map show $ newTodo
-        hClose handle
-        hClose tempHandle
-        removeFile filename
-        renameFile tempName filename
+    let tasks = makeTasks . lines $ contents
+        newTodo = delete task tasks
+    lift $ do
+      hPutStrLn tempHandle $ unlines . map show $ newTodo
+      hClose handle
+      hClose tempHandle
+      removeFile filename
+      renameFile tempName filename
 
 add :: [String] -> IO()
 add [filename] = do
@@ -96,14 +91,12 @@ add [filename] = do
     let newTodo = show . makeTask $ line
     appendFile filename (newTodo ++ "\n")
 
-startReminder :: [String] -> IO()
+startReminder :: [String] -> MaybeT IO()
 startReminder [filename] = do
     task <- getTopTask filename
-    case task of
-      Nothing -> return ()
-      Just task -> forever $ do
+    lift $ forever $ do
         let delay = 20 :: Int
-        repeatedTimer (remind task) (mDelay $ fromIntegral delay)
+        remind task
         threadDelay (delay * 60 * 1000)
 
 remind :: Task -> IO()
