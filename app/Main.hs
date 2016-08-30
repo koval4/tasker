@@ -44,7 +44,7 @@ getPriority dl task = let numenator = (toInteger . (*3) . cost $ task)
 getTopTask :: String -> MaybeT IO Task
 getTopTask filename = do
     content <- lift $ readFile filename
-    guard (null content)
+    guard (not . null $ content)
     utcCurrDay <- lift getCurrentTime
     let currDay = utctDay utcCurrDay
         tasks = makeTasks . lines $ content
